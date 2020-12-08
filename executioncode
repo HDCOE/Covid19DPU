@@ -1,0 +1,68 @@
+export FREEZE=freeze
+export CHKPT_DIR=checkpoint
+export CHKPT_FILENAME=float_model.ckpt
+export INFER_GRAPH_FILENAME=inference_graph.pb
+export FROZEN_GRAPH=frozen_graph.pb
+
+export INPUT_HEIGHT=224
+export INPUT_WIDTH=224
+export INPUT_CHAN=3
+export INPUT_SHAPE=?,${INPUT_HEIGHT},${INPUT_WIDTH},${INPUT_CHAN}
+export INPUT_NODE=images_in
+export OUTPUT_NODE=conv2d_3/BiasAdd
+
+export LOG=logs
+export FREEZE_LOG=freeze.log
+
+
+
+# Freeze 
+# freeze graph
+run_freeze_graph() {
+  freeze_graph \
+    --input_graph      ${CHKPT_DIR}/${INFER_GRAPH_FILENAME} \
+    --input_checkpoint ${CHKPT_DIR}/${CHKPT_FILENAME} \
+    --input_binary     true \
+    --output_graph     ${FREEZE}/${FROZEN_GRAPH} \
+    --output_node_names ${OUTPUT_NODE}
+}
+
+#quantize
+
+export CALIB_IMAGES=250
+run_quant() {
+
+  # log the quantizer version being used
+  vai_q_tensorflow --version
+  
+  # quantize
+  vai_q_tensorflow quantize \
+    --input_frozen_graph ${FREEZE}/${FROZEN_GRAPH} \
+		--input_fn           image_input_fn.calib_input \
+		--output_dir         ${QUANT} \
+	  --input_nodes        ${INPUT_NODE} \
+		--output_nodes       ${OUTPUT_NODE} \
+		--input_shapes       ${INPUT_SHAPE} \
+		--calib_iter         10
+}
+
+#compile 
+ARCH=/opt/vitis_ai/compiler/arch/dpuv2/ZCU104/ZCU104.json 
+export QUANT=quantize
+export COMP_LOG_ZCU102=compile_zcu102.log
+export NET_NAME=CovidNet
+export COMPILE_ZCU102=compile_zcu102
+compile() {
+  vai_c_tensorflow \
+    --frozen_pb  ${QUANT}/deploy_model.pb \
+    --arch       ${ARCH} \
+    --output_dir ${COMPILE_ZCU102} \
+    --net_name   ${NET_NAME}
+}
+
+# upload the .elf and images through Ethernet
+run ssh -Y root@[ip of zcu104]
+scp -r foldername root@[ip of zcu104]:~/
+
+
+#
